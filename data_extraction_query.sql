@@ -168,7 +168,7 @@ add_tier_rank AS (
         is_asa_clustered,
         vendor_count_caught_by_asa,
         fee,
-        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id ORDER BY fee) AS tier_rank_master_asa,
+        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id, is_lb_lm ORDER BY fee) AS tier_rank_master_asa,
         * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee)
     FROM add_min_order_count
 ),
@@ -184,7 +184,7 @@ add_num_tiers AS (
         vendor_count_caught_by_asa,
         fee,
         tier_rank_master_asa,
-        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id) AS num_tiers_master_asa,
+        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id, is_lb_lm) AS num_tiers_master_asa,
         * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee, tier_rank_master_asa)
     FROM add_tier_rank
 )
