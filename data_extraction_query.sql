@@ -7,8 +7,6 @@ WITH join_vendors_and_fees AS (
     b.vendor_count_caught_by_asa,
     b.vendor_code,
     a.fee,
-    c.tier_rank_master_asa,
-    c.num_tiers_master_asa,
     MIN(a.fee) OVER (PARTITION BY a.entity_id, a.country_code, a.master_asa_id) AS min_tt_fee_master_asa_level,
   FROM `dh-logistics-product-ops.pricing.df_tiers_per_asa_loved_brands_scaled_code` a -- This table contains the DF tiers of each ASA
   LEFT JOIN `dh-logistics-product-ops.pricing.vendor_ids_per_asa_loved_brands_scaled_code` b -- This table contains the vendor IDs per ASA
@@ -16,12 +14,6 @@ WITH join_vendors_and_fees AS (
     AND a.entity_id = b.entity_id
     AND a.country_code = b.country_code
     AND a.master_asa_id = b.master_asa_id
-  LEFT JOIN `dh-logistics-product-ops.pricing.cvr_per_df_bucket_asa_level_loved_brands_scaled_code` c -- This table contains the tier rank and number of tiers per ASA
-    ON TRUE
-    AND a.entity_id = c.entity_id
-    AND a.country_code = c.country_code
-    AND a.master_asa_id = c.master_asa_id
-    AND a.fee = c.df_total
 ),
 
 -- Step 2: Get the active entities
@@ -117,7 +109,7 @@ LEFT JOIN `dh-logistics-product-ops.pricing.final_vendor_list_all_data_temp_love
     AND a.entity_id = c.entity_id
     AND a.country_code = c.country_code
     AND a.vendor_code = c.vendor_code
-GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11
 ORDER BY a.entity_id, a.master_asa_id, a.vendor_code, a.fee;
 
 -- Step 5: Calculate the elasticity on the ASA level
@@ -134,8 +126,6 @@ WITH asa_level_data AS (
     is_asa_clustered,
     vendor_count_caught_by_asa,
     fee,
-    tier_rank_master_asa,
-    num_tiers_master_asa,
     is_lb_lm,
     AVG(min_tt_fee_master_asa_level) AS min_tt_fee_master_asa_level,
     SUM(vendor_order_count) AS order_count_vendor_cluster_tt_fee_level,
@@ -146,7 +136,7 @@ WITH asa_level_data AS (
     ROUND(SUM(gp_local), 2) AS gp_local_vendor_cluster_tt_fee_level,
     ROUND(SUM(gp_eur), 2) AS gp_eur_vendor_cluster_tt_fee_level
   FROM `dh-logistics-product-ops.pricing.vendors_and_fees_per_asa_order_loved_brands_pairwise_simulation`
-  GROUP BY 1,2,3,4,5,6,7,8,9,10,11
+  GROUP BY 1,2,3,4,5,6,7,8,9
 ),
 
 add_min_order_count AS (
@@ -166,6 +156,37 @@ add_min_order_count AS (
     LAG(a.fee) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm ORDER BY a.fee) AS previous_fee_vendor_cluster_tt_fee_level,
     LAG(a.order_count_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm ORDER BY a.fee) AS previous_order_count_vendor_cluster_tt_fee_level
   FROM asa_level_data a
+),
+
+add_tier_rank AS (
+    SELECT
+        region,
+        entity_id,
+        country_code,
+        master_asa_id,
+        asa_common_name,
+        is_asa_clustered,
+        vendor_count_caught_by_asa,
+        fee,
+        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id ORDER BY fee) AS tier_rank_master_asa,
+        * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee)
+    FROM add_min_order_count
+),
+
+add_num_tiers AS (
+    SELECT
+        region,
+        entity_id,
+        country_code,
+        master_asa_id,
+        asa_common_name,
+        is_asa_clustered,
+        vendor_count_caught_by_asa,
+        fee,
+        tier_rank_master_asa,
+        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id) AS num_tiers_master_asa,
+        * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee, tier_rank_master_asa)
+    FROM add_tier_rank
 )
 
 SELECT
@@ -178,5 +199,5 @@ SELECT
     WHEN previous_fee_vendor_cluster_tt_fee_level = 0 OR num_tiers_master_asa = 1 OR tier_rank_master_asa = 1 OR previous_order_count_vendor_cluster_tt_fee_level = 0 THEN NULL
     ELSE (order_count_vendor_cluster_tt_fee_level / previous_order_count_vendor_cluster_tt_fee_level - 1) / (fee / previous_fee_vendor_cluster_tt_fee_level - 1)
   END AS tier_elasticity_vendor_cluster_level,
-FROM add_min_order_count
+FROM add_num_tiers
 ORDER BY entity_id, master_asa_id, is_lb_lm, tier_rank_master_asa;
