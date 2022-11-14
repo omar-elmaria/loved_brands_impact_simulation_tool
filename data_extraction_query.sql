@@ -174,8 +174,9 @@ add_tier_rank AS (
         is_asa_clustered,
         vendor_count_caught_by_asa,
         fee,
-        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id ORDER BY fee) AS tier_rank_master_asa,
-        * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee)
+        is_lb_lm,
+        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id, is_lb_lm ORDER BY fee) AS tier_rank_master_asa,
+        * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee, is_lb_lm)
     FROM add_min_order_count
 ),
 
@@ -190,8 +191,9 @@ add_num_tiers AS (
         vendor_count_caught_by_asa,
         fee,
         tier_rank_master_asa,
-        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id) AS num_tiers_master_asa,
-        * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee, tier_rank_master_asa)
+        is_lb_lm,
+        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id, is_lb_lm) AS num_tiers_master_asa,
+        * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee, tier_rank_master_asa, is_lb_lm)
     FROM add_tier_rank
 )
 
@@ -205,5 +207,11 @@ SELECT
     WHEN previous_fee_vendor_cluster_tt_fee_level = 0 OR num_tiers_master_asa = 1 OR tier_rank_master_asa = 1 OR previous_order_count_vendor_cluster_tt_fee_level = 0 THEN NULL
     ELSE (order_count_vendor_cluster_tt_fee_level / previous_order_count_vendor_cluster_tt_fee_level - 1) / (fee / previous_fee_vendor_cluster_tt_fee_level - 1)
   END AS tier_elasticity_vendor_cluster_level,
+
+  -- Calculate the % difference between one TT fee tier and the next
+  CASE 
+    WHEN previous_fee_vendor_cluster_tt_fee_level = 0 OR num_tiers_master_asa = 1 OR tier_rank_master_asa = 1 THEN NULL
+    ELSE (fee / previous_fee_vendor_cluster_tt_fee_level - 1)
+  END AS fee_pct_diff_vendor_cluster_level,
 FROM add_num_tiers
 ORDER BY entity_id, master_asa_id, is_lb_lm, tier_rank_master_asa;
