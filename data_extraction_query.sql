@@ -95,6 +95,8 @@ SELECT
   COALESCE(SUM(actual_df_paid_by_customer / exchange_rate), 0) AS df_revenue_eur,
   COALESCE(SUM(gmv_local), 0) AS vendor_gmv_local,
   COALESCE(SUM(gmv_local / exchange_rate), 0) AS vendor_gmv_eur,
+  COALESCE(SUM(actual_df_paid_by_customer + commission_local + joker_vendor_fee_local + service_fee_local + COALESCE(sof_local_cdwh, sof_local)), 0) AS tot_revenue_local,
+  COALESCE(SUM((actual_df_paid_by_customer + commission_local + joker_vendor_fee_local + service_fee_local + COALESCE(sof_local_cdwh, sof_local)) / exchange_rate), 0) AS tot_revenue_eur,
   COALESCE(SUM(actual_df_paid_by_customer + commission_local + joker_vendor_fee_local + service_fee_local + COALESCE(sof_local_cdwh, sof_local) - delivery_costs_local), 0) AS gp_local,
   COALESCE(SUM((actual_df_paid_by_customer + commission_local + joker_vendor_fee_local + service_fee_local + COALESCE(sof_local_cdwh, sof_local) - delivery_costs_local) / exchange_rate), 0) AS gp_eur,
 FROM join_vendors_and_fees a
@@ -133,6 +135,8 @@ WITH asa_level_data AS (
     ROUND(SUM(df_revenue_eur), 2) AS df_revenue_eur_vendor_cluster_tt_fee_level,
     ROUND(SUM(vendor_gmv_local), 2) AS vendor_gmv_local_vendor_cluster_tt_fee_level,
     ROUND(SUM(vendor_gmv_eur), 2) AS vendor_gmv_eur_vendor_cluster_tt_fee_level,
+    ROUND(SUM(tot_revenue_local), 2) AS tot_revenue_local_vendor_cluster_tt_fee_level,
+    ROUND(SUM(tot_revenue_eur), 2) AS tot_revenue_eur_vendor_cluster_tt_fee_level,
     ROUND(SUM(gp_local), 2) AS gp_local_vendor_cluster_tt_fee_level,
     ROUND(SUM(gp_eur), 2) AS gp_eur_vendor_cluster_tt_fee_level
   FROM `dh-logistics-product-ops.pricing.vendors_and_fees_per_asa_order_loved_brands_pairwise_simulation`
@@ -151,6 +155,8 @@ add_min_order_count AS (
     SUM(a.df_revenue_eur_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS df_revenue_eur_vendor_cluster_level,
     SUM(a.vendor_gmv_local_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS gmv_local_vendor_cluster_level,
     SUM(a.vendor_gmv_eur_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS gmv_eur_vendor_cluster_level,
+    SUM(a.tot_revenue_local_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS tot_revenue_local_vendor_cluster_level,
+    SUM(a.tot_revenue_eur_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS tot_revenue_eur_vendor_cluster_level,
     SUM(a.gp_local_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS gp_local_vendor_cluster_level,
     SUM(a.gp_eur_vendor_cluster_tt_fee_level) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm) AS gp_eur_vendor_cluster_level,
     LAG(a.fee) OVER (PARTITION BY a.entity_id, a.master_asa_id, a.is_lb_lm ORDER BY a.fee) AS previous_fee_vendor_cluster_tt_fee_level,
@@ -168,7 +174,7 @@ add_tier_rank AS (
         is_asa_clustered,
         vendor_count_caught_by_asa,
         fee,
-        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id, is_lb_lm ORDER BY fee) AS tier_rank_master_asa,
+        ROW_NUMBER() OVER (PARTITION BY entity_id, country_code, master_asa_id ORDER BY fee) AS tier_rank_master_asa,
         * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee)
     FROM add_min_order_count
 ),
@@ -184,7 +190,7 @@ add_num_tiers AS (
         vendor_count_caught_by_asa,
         fee,
         tier_rank_master_asa,
-        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id, is_lb_lm) AS num_tiers_master_asa,
+        MAX(tier_rank_master_asa) OVER (PARTITION BY entity_id, country_code, master_asa_id) AS num_tiers_master_asa,
         * EXCEPT(region, entity_id, country_code, master_asa_id, asa_common_name, is_asa_clustered, vendor_count_caught_by_asa, fee, tier_rank_master_asa)
     FROM add_tier_rank
 )
