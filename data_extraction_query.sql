@@ -8,8 +8,8 @@ WITH join_vendors_and_fees AS (
     b.vendor_code,
     a.fee,
     MIN(a.fee) OVER (PARTITION BY a.entity_id, a.country_code, a.master_asa_id) AS min_tt_fee_master_asa_level,
-  FROM `dh-logistics-product-ops.pricing.df_tiers_per_asa_loved_brands_scaled_code` a -- This table contains the DF tiers of each ASA
-  LEFT JOIN `dh-logistics-product-ops.pricing.vendor_ids_per_asa_loved_brands_scaled_code` b -- This table contains the vendor IDs per ASA
+  FROM `dh-logistics-product-ops.staging.df_tiers_per_asa_loved_brands_scaled_code` a -- This table contains the DF tiers of each ASA (staging dataset because that's where the production tables are stored)
+  LEFT JOIN `dh-logistics-product-ops.staging.vendor_ids_per_asa_loved_brands_scaled_code` b -- This table contains the vendor IDs per ASA (staging dataset because that's where the production tables are stored)
     ON TRUE
     AND a.entity_id = b.entity_id
     AND a.country_code = b.country_code
@@ -106,7 +106,7 @@ LEFT JOIN orders_table b
     AND a.country_code = b.country_code
     AND a.vendor_code = b.vendor_id
     AND a.fee = b.dps_travel_time_fee_local
-LEFT JOIN `dh-logistics-product-ops.pricing.final_vendor_list_all_data_temp_loved_brands_scaled_code` c -- The final containing the LBs
+LEFT JOIN `dh-logistics-product-ops.staging.final_vendor_list_all_data_temp_loved_brands_scaled_code` c -- The final containing the LBs (staging dataset because that's where the production tables are stored)
   ON TRUE
     AND a.entity_id = c.entity_id
     AND a.country_code = c.country_code
