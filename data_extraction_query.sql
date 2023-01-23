@@ -8,8 +8,8 @@ WITH join_vendors_and_fees AS (
     b.vendor_code,
     a.fee,
     MIN(a.fee) OVER (PARTITION BY a.entity_id, a.country_code, a.master_asa_id) AS min_tt_fee_master_asa_level,
-  FROM `dh-logistics-product-ops.staging.df_tiers_per_asa_loved_brands_scaled_code` a -- This table contains the DF tiers of each ASA (staging dataset because that's where the production tables are stored)
-  LEFT JOIN `dh-logistics-product-ops.staging.vendor_ids_per_asa_loved_brands_scaled_code` b -- This table contains the vendor IDs per ASA (staging dataset because that's where the production tables are stored)
+  FROM `dh-logistics-product-ops.pricing.df_tiers_per_asa_loved_brands_scaled_code` a -- This table contains the DF tiers of each ASA
+  LEFT JOIN `dh-logistics-product-ops.pricing.vendor_ids_per_asa_loved_brands_scaled_code` b -- This table contains the vendor IDs per ASA
     ON TRUE
     AND a.entity_id = b.entity_id
     AND a.country_code = b.country_code
@@ -74,16 +74,18 @@ orders_table AS (
   LEFT JOIN `fulfillment-dwh-production.curated_data_shared_central_dwh.orders` dwh 
     ON TRUE 
       AND a.entity_id = dwh.global_entity_id
-      AND a.platform_order_code = dwh.order_id -- There is no country_code field in this table
+      AND a.platform_order_code = dwh.order_id
   LEFT JOIN `fulfillment-dwh-production.pandata_curated.pd_orders` pd -- Contains info on the orders in Pandora countries
     ON TRUE 
       AND a.entity_id = pd.global_entity_id
       AND a.platform_order_code = pd.code 
-      AND a.created_date = pd.created_date_utc -- There is no country_code field in this table
+      AND a.created_date = pd.created_date_utc
   INNER JOIN entities ent ON a.entity_id = ent.entity_id -- Get the region associated with every entity_id
   WHERE TRUE
     AND created_date BETWEEN DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH) AND LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH)) -- Last completed month of data
-    AND delivery_status = "completed" AND a.is_sent -- Completed AND Successful order
+    AND a.is_sent -- Successful order
+    AND a.vendor_price_scheme_type IN ("Experiment", "Automatic scheme", "Manual")
+    AND a.variant IN ("Control", "Original")
 )
 
 -- Step 4: Join the orders data to the ASA data
@@ -106,13 +108,14 @@ LEFT JOIN orders_table b
     AND a.country_code = b.country_code
     AND a.vendor_code = b.vendor_id
     AND a.fee = b.dps_travel_time_fee_local
-LEFT JOIN `dh-logistics-product-ops.staging.final_vendor_list_all_data_temp_loved_brands_scaled_code` c -- The final containing the LBs (staging dataset because that's where the production tables are stored)
+LEFT JOIN `dh-logistics-product-ops.pricing.final_vendor_list_all_data_temp_loved_brands_scaled_code` c -- The final containing the LBs
   ON TRUE
     AND a.entity_id = c.entity_id
     AND a.country_code = c.country_code
     AND a.vendor_code = c.vendor_code
-GROUP BY 1,2,3,4,5,6,7,8,9,10,11
-ORDER BY a.entity_id, a.master_asa_id, a.vendor_code, a.fee;
+GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+ORDER BY a.entity_id, a.master_asa_id, a.vendor_code, a.fee
+;
 
 -- Step 5: Calculate the elasticity on the ASA level
 
@@ -140,7 +143,7 @@ WITH asa_level_data AS (
     ROUND(SUM(gp_local), 2) AS gp_local_vendor_cluster_tt_fee_level,
     ROUND(SUM(gp_eur), 2) AS gp_eur_vendor_cluster_tt_fee_level
   FROM `dh-logistics-product-ops.pricing.vendors_and_fees_per_asa_order_loved_brands_pairwise_simulation`
-  GROUP BY 1,2,3,4,5,6,7,8,9
+  GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9
 ),
 
 add_min_order_count AS (
@@ -209,7 +212,7 @@ SELECT
   END AS tier_elasticity_vendor_cluster_level,
 
   -- Calculate the % difference between one TT fee tier and the next
-  CASE 
+  CASE
     WHEN previous_fee_vendor_cluster_tt_fee_level = 0 OR num_tiers_master_asa = 1 OR tier_rank_master_asa = 1 THEN NULL
     ELSE (fee / previous_fee_vendor_cluster_tt_fee_level - 1)
   END AS fee_pct_diff_vendor_cluster_level,
